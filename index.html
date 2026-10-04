@@ -102,23 +102,20 @@
 </head>
 <body>
 
-    <!-- Setup Form Modal (فۆرمی سەرەتایی چوونە ژوورەوە) -->
+    <!-- Setup Form Modal -->
     <div id="setupModal" class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
         <div class="bg-[#2b170e] border-4 border-amber-400 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-right">
             <div class="text-center mb-6">
-                <!-- ئیمۆجیی بێ جێندەر: پیاوی جامانەبەسەر لەگەڵ پیالەی چا -->
                 <div class="text-5xl mb-2">🧔☕</div>
                 <h2 class="text-2xl font-extrabold text-amber-300">بەخێرهاتیت بۆ ناو مەیدانەکەی حاجی</h2>
                 <p class="text-xs text-amber-100/70 mt-1">تکایە زانیارییەکان پڕبکەرەوە تا دەست پێبکەین</p>
             </div>
 
-            <!-- ناو -->
             <div class="mb-4">
                 <label class="block text-xs font-bold text-amber-200 mb-1.5">ناوی خۆت:</label>
                 <input type="text" id="inputPlayerName" value="یاریزان" class="w-full bg-black/40 border border-amber-500/50 rounded-xl px-4 py-2.5 text-amber-100 text-sm focus:outline-none focus:border-amber-400">
             </div>
 
-            <!-- ئاستی یاری -->
             <div class="mb-4">
                 <label class="block text-xs font-bold text-amber-200 mb-1.5">ئاستی یاریکردن:</label>
                 <div class="grid grid-cols-3 gap-2">
@@ -128,7 +125,6 @@
                 </div>
             </div>
 
-            <!-- جۆری بەرد -->
             <div class="mb-6">
                 <label class="block text-xs font-bold text-amber-200 mb-1.5">رەنگی بەردەکەت:</label>
                 <div class="grid grid-cols-4 gap-2">
@@ -189,13 +185,14 @@
     </div>
 
     <script>
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxEUwAIpbvtH19hQBVeYkVqPPLOwVPxLiEBAHUqKZCBsucMN57Eoj9IKbfim-uK4dL5/exec";
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyaCy4w4WpQIbrQYdZB0CapD7uqrXlyNsNEVZeM2_Wn6ejz8x3w4YPTFIsIKYwhhyPI/exec";
 
         let board = [];
         let turn = 1;
         let selectedPiece = null;
         let validMoves = [];
         let isAiThinking = false;
+        let mustContinueJumpPiece = null;
         
         let playerName = "یاریزان";
         let aiDepth = 2;
@@ -212,6 +209,11 @@
                 "بەخوا بەردەکەی بەزاند! چاو نەترسانە لێیدا.",
                 "ڕاوچییەکی ڕاستەقینەی! بەردەکەت خوارد و سڕیەتەوە.",
                 "ئەمەیە لێهاتوویی! حاجی چاییەکت بۆ تێدەكات لەسەر ئەم გამە."
+            ],
+            multiCapture: [
+                "ئەبڕێ و دەبڕێ! دووانەی خوارد بەسەر یەکەوە!",
+                "یەکی لە دوای یەک! حاجی سەری سوڕما لەم زیرەکییە.",
+                "ڕاوێکی بەلێشاو! دوانەکەی پێکەوە هەڵگرت!"
             ],
             aiMove: [
                 "حاجی ئێستا نۆبەیەتی، سەیری ئەم فێڵە بکە!",
@@ -263,13 +265,7 @@
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify(formData)
-            })
-            .then(() => {
-                console.log("زانیارییەکان بە سەرکەوتوویی نێرران بۆ گوگل شیت!");
-            })
-            .catch(error => {
-                console.error("هەڵە لە ناردنی زانیاری:", error);
-            });
+            }).catch(error => console.error("هەڵە:", error));
         }
 
         function startGameFromModal() {
@@ -277,7 +273,6 @@
             if(nameInput) playerName = nameInput;
 
             sendDataToGoogleSheet(playerName, aiDepth, playerColorClass);
-
             document.getElementById('setupModal').style.display = 'none';
 
             let diffText = aiDepth === 1 ? "ئاسان" : (aiDepth === 2 ? "ناوەند" : "قورس");
@@ -308,6 +303,7 @@
             turn = 1;
             selectedPiece = null;
             validMoves = [];
+            mustContinueJumpPiece = null;
             isAiThinking = false;
             updateStatus();
             renderBoard();
@@ -351,9 +347,28 @@
 
         function handleSquareClick(r, c) {
             const piece = board[r][c];
+            
+            // ئەگەر مەرجی خواردنی بەدوای یەکدا هەبێت
+            if (mustContinueJumpPiece) {
+                if (mustContinueJumpPiece.row === r && mustContinueJumpPiece.col === c) {
+                    selectedPiece = { row: r, col: c };
+                    let allM = getValidMovesForPiece(r, c, board, true);
+                    validMoves = allM.filter(m => m.captured !== null);
+                    renderBoard();
+                    return;
+                }
+                
+                // ئەگەر خانەی دووەمی مەبەست (شوێنی بازدان) داگیرا
+                const move = validMoves.find(m => m.r === r && m.c === c);
+                if (move) {
+                    executeMoveAndSwitch(selectedPiece.row, selectedPiece.col, move.r, move.c, move.captured, 1);
+                }
+                return;
+            }
+
             if (piece !== 0 && piece.player === turn) {
                 selectedPiece = { row: r, col: c };
-                validMoves = getValidMovesForPiece(r, c, board);
+                validMoves = getValidMovesForPiece(r, c, board, false);
                 renderBoard();
                 return;
             }
@@ -364,7 +379,7 @@
             }
         }
 
-        function getValidMovesForPiece(r, c, currentBoard) {
+        function getValidMovesForPiece(r, c, currentBoard, onlyJumps = false) {
             let moves = [];
             const piece = currentBoard[r][c];
             if (piece === 0) return moves;
@@ -384,7 +399,9 @@
                 const nextC = c + d.dc;
                 if (isValidCoord(nextR, nextC)) {
                     if (currentBoard[nextR][nextC] === 0) {
-                        moves.push({ r: nextR, c: nextC, captured: null, fromR: r, fromC: c });
+                        if (!onlyJumps) {
+                            moves.push({ r: nextR, c: nextC, captured: null, fromR: r, fromC: c });
+                        }
                     } else if (currentBoard[nextR][nextC].player !== piece.player) {
                         const jumpR = nextR + d.dr;
                         const jumpC = nextC + d.dc;
@@ -405,7 +422,7 @@
                         if (!isValidCoord(nextR, nextC)) break;
 
                         if (currentBoard[nextR][nextC] === 0) {
-                            if (!blocked) {
+                            if (!blocked && !onlyJumps) {
                                 moves.push({ r: nextR, c: nextC, captured: null, fromR: r, fromC: c });
                             }
                         } else {
@@ -431,7 +448,7 @@
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     if (currentBoard[r][c] !== 0 && currentBoard[r][c].player === player) {
-                        let pMoves = getValidMovesForPiece(r, c, currentBoard);
+                        let pMoves = getValidMovesForPiece(r, c, currentBoard, false);
                         allMoves.push(...pMoves);
                     }
                 }
@@ -458,9 +475,28 @@
             if (piece.player === 1 && toR === 0 && !piece.king) { piece.king = true; becameKing = true; }
             if (piece.player === 2 && toR === 7 && !piece.king) { piece.king = true; becameKing = true; }
 
+            let canContinueJump = false;
+            if (wasCapture && !becameKing) {
+                let furtherJumps = getValidMovesForPiece(toR, toC, board, true).filter(m => m.captured !== null);
+                if (furtherJumps.length > 0) {
+                    canContinueJump = true;
+                }
+            }
+
             selectedPiece = null;
             validMoves = [];
-            
+
+            if (canContinueJump && playerNum === 1) {
+                mustContinueJumpPiece = { row: toR, col: toC };
+                selectedPiece = mustContinueJumpPiece;
+                validMoves = getValidMovesForPiece(toR, toC, board, true).filter(m => m.captured !== null);
+                updateStatus();
+                renderBoard();
+                setHajiMessage(getRandomComment('multiCapture'));
+                return;
+            }
+
+            mustContinueJumpPiece = null;
             turn = playerNum === 1 ? 2 : 1;
             updateStatus();
             renderBoard();
@@ -497,7 +533,11 @@
         }
 
         function updateStatus() {
-            document.getElementById('status').innerText = `نۆرەی: ${turn === 1 ? playerName + ' (تۆ)' : 'حاجی (زەرد)'}`;
+            if (mustContinueJumpPiece) {
+                document.getElementById('status').innerText = `نۆرەی: ${playerName} (بەردەوام بە لە خواردن!)`;
+            } else {
+                document.getElementById('status').innerText = `نۆرەی: ${turn === 1 ? playerName + ' (تۆ)' : 'حاجی (زەرد)'}`;
+            }
         }
 
         function makeAiMove() {
